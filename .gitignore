@@ -1,0 +1,17 @@
+.*
+!.gitignore
+
+target/
+
+
+# Safety net
+*.map
+*.jpeg
+*.jpg
+*.png
+*.zip
+*.gz
+*.tar
+*.tgz
+*.mov
+*.mp4
