@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	// --- Get the port
 	let port = app
-		.value_of("port")
+		.get_one::<String>("port")
 		.and_then(|val| val.parse::<u16>().ok())
 		.unwrap_or(DEFAULT_PORT);
 
@@ -118,7 +118,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		println!("\tlive mode on.")
 	}
 
-	let ip = if app.contains_id("public") { [0, 0, 0, 0] } else { [127, 0, 0, 1] };
+	let ip = if app.contains_id("public") {
+		[0, 0, 0, 0]
+	} else {
+		[127, 0, 0, 1]
+	};
 	warp::serve(routes).run((ip, port)).await;
 
 	Ok(())
@@ -191,7 +195,9 @@ enum SpecialPath {
 	NotSpecial,
 }
 
-fn with_path_type(root_dir: Arc<PathBuf>) -> impl Filter<Extract = (SpecialPath,), Error = std::convert::Infallible> + Clone {
+fn with_path_type(
+	root_dir: Arc<PathBuf>,
+) -> impl Filter<Extract = (SpecialPath,), Error = std::convert::Infallible> + Clone {
 	warp::any().and(warp::path::full()).map(move |full_path: FullPath| {
 		let web_path = full_path.as_str().trim_start_matches('/');
 		let target_path = root_dir.join(web_path);
