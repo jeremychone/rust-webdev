@@ -2,7 +2,7 @@ use clap::{crate_version, Arg, ArgAction, Command};
 
 pub fn cmd_app() -> Command {
 	Command::new("webdev")
-		.version(&crate_version!()[..])
+		.version(crate_version!())
 		.about("Simple static file web serving using warp")
 		.arg(Arg::new("public").num_args(0).long("public").help("Open the server the world"))
 		.arg(Arg::new("port").short('p').num_args(1).help("port (default 8080)"))

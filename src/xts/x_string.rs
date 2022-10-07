@@ -30,6 +30,6 @@ impl XString for DirEntry {
 
 impl XString for Option<DirEntry> {
 	fn x_string(&self) -> Option<String> {
-		self.as_ref().and_then(|v| DirEntry::x_string(v))
+		self.as_ref().and_then(DirEntry::x_string)
 	}
 }

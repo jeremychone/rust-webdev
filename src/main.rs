@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		port,
 		root_dir.to_string_lossy()
 	);
-	if live_mode == false {
+	if !live_mode {
 		println!(
 			"\tFor live mode add '<script src=\"/_webdev_live.js\"></script>' to htmls,
 \tor run command with 'webdev -l' to automatically add script tag to all served html files."
@@ -204,7 +204,7 @@ fn with_path_type(
 
 		let path_info = PathInfo {
 			root_dir: root_dir.clone(),
-			target_path: target_path,
+			target_path,
 		};
 
 		if path_info.target_path.is_dir() {
@@ -231,7 +231,7 @@ async fn special_file_handler(special_path: SpecialPath, live_mode: bool) -> Res
 			let paths = fs::read_dir(&target_path);
 			match paths {
 				Ok(paths) => {
-					for path in paths.into_iter() {
+					for path in paths {
 						if let Some(path) = path.ok().map(|v| v.path()) {
 							if let Some(diff) = diff_paths(&path, root_dir.as_ref()).x_string() {
 								let disp = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
