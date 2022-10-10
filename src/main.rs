@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let root_dir = Path::new(&root_dir).to_path_buf();
 
 	// --- webdev live watch
-	let live_mode = app.contains_id("live");
+	let live_mode = app.get_flag("live");
 
 	let live_ws_counter = Counter::default();
 	let live_ws_counter = Arc::new(live_ws_counter);
@@ -118,7 +118,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		println!("\tlive mode on.")
 	}
 
-	let ip = if app.contains_id("public") {
+	let is_public = app.get_flag("public");
+
+	let ip = if is_public {
+		println!("! public mode on (listening on 0.0.0.0)");
 		[0, 0, 0, 0]
 	} else {
 		[127, 0, 0, 1]
