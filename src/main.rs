@@ -187,10 +187,13 @@ async fn live_watch(ws: WebSocket, mut change_rx: broadcast::Receiver<()>, _live
 // endregion: --- Live Watch
 
 // region:    --- Special File (dir and extension less)
+#[derive(Debug)]
 struct PathInfo {
 	root_dir: Arc<PathBuf>,
 	target_path: PathBuf,
 }
+
+#[derive(Debug)]
 enum SpecialPath {
 	Dir(PathInfo),
 	ExtLessFile(PathInfo),
@@ -203,7 +206,15 @@ fn with_path_type(
 ) -> impl Filter<Extract = (SpecialPath,), Error = std::convert::Infallible> + Clone {
 	warp::any().and(warp::path::full()).map(move |full_path: FullPath| {
 		let web_path = full_path.as_str().trim_start_matches('/');
-		let target_path = root_dir.join(web_path);
+
+		// -- Add .html on extension less path.
+		// If no extension and not end with /, for now add `.html`
+		// Later, this might be a config property.
+		let target_path = if !web_path.contains('.') && !web_path.ends_with('/') {
+			root_dir.join(format!("{web_path}.html"))
+		} else {
+			root_dir.join(web_path)
+		};
 
 		let path_info = PathInfo {
 			root_dir: root_dir.clone(),
@@ -225,6 +236,7 @@ fn with_path_type(
 }
 
 async fn special_file_handler(special_path: SpecialPath, live_mode: bool) -> Result<Html<String>, warp::Rejection> {
+	println!("->> special_file_handler {special_path:?}");
 	match special_path {
 		SpecialPath::Dir(path_info) => {
 			// TODO: Needs to handle the case when we have a index.html
