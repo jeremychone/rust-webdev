@@ -1,5 +1,5 @@
-///! as_string  trait/implementations
-///! ----
+//! as_string  trait/implementations
+//! ----
 use std::fs::DirEntry;
 use std::path::PathBuf;
 

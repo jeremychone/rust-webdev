@@ -23,5 +23,5 @@ warp = "0.3"
 pathdiff = "0.2"
 clap =  {version = "4", features = ["cargo"]}
 futures = "0.3"
-notify = "5"
-notify-debouncer-mini = "0.2"
+notify = "6"
+notify-debouncer-mini = "0.4"

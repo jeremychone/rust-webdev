@@ -147,7 +147,7 @@ async fn do_watch_paths(watch_paths: Vec<PathBuf>) -> (broadcast::Sender<()>, br
 		// let mut watcher = watcher(tx, Duration::from_millis(200)).unwrap();
 
 		// No specific tickrate, max debounce time
-		let mut debouncer = new_debouncer(Duration::from_millis(1000), None, tx).unwrap();
+		let mut debouncer = new_debouncer(Duration::from_millis(1000), tx).unwrap();
 
 		let watcher = debouncer.watcher();
 
