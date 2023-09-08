@@ -210,7 +210,7 @@ fn with_path_type(
 		// -- Add .html on extension less path.
 		// If no extension and not end with /, for now add `.html`
 		// Later, this might be a config property.
-		let target_path = if !web_path.contains('.') && !web_path.ends_with('/') {
+		let target_path = if !web_path.is_empty() && !web_path.contains('.') && !web_path.ends_with('/') {
 			root_dir.join(format!("{web_path}.html"))
 		} else {
 			root_dir.join(web_path)
@@ -236,7 +236,6 @@ fn with_path_type(
 }
 
 async fn special_file_handler(special_path: SpecialPath, live_mode: bool) -> Result<Html<String>, warp::Rejection> {
-	println!("->> special_file_handler {special_path:?}");
 	match special_path {
 		SpecialPath::Dir(path_info) => {
 			// TODO: Needs to handle the case when we have a index.html
