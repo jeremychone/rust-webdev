@@ -25,6 +25,7 @@ mod xts;
 
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_WEB_FOLDER: &str = "./";
+const DEBOUNCE_DURATION_MS: u64 = 50;
 
 #[derive(Default)]
 struct Counter(Arc<Mutex<i32>>);
@@ -147,7 +148,7 @@ async fn do_watch_paths(watch_paths: Vec<PathBuf>) -> (broadcast::Sender<()>, br
 		// let mut watcher = watcher(tx, Duration::from_millis(200)).unwrap();
 
 		// No specific tickrate, max debounce time
-		let mut debouncer = new_debouncer(Duration::from_millis(1000), tx).unwrap();
+		let mut debouncer = new_debouncer(Duration::from_millis(DEBOUNCE_DURATION_MS), tx).unwrap();
 
 		let watcher = debouncer.watcher();
 
