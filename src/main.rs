@@ -251,7 +251,7 @@ async fn special_file_handler(special_path: SpecialPath, live_mode: bool) -> Res
 							if let Some(diff) = diff_paths(&path, root_dir.as_ref()).x_string() {
 								let disp = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
 								let suffix = if path.is_dir() { "/" } else { "" };
-								let href = format!("/{}", diff);
+								let href = format!("/{}{suffix}", diff);
 								html.push_str(&format!(r#"<a href="{}">{}{suffix}</a>"#, href, disp));
 							}
 						}
