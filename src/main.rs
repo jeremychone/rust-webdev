@@ -1,27 +1,33 @@
 use crate::cmd::cmd_app;
-use crate::tmpl::JS_LIVE_SCRIPT_TAG;
-use crate::tmpl::{HTML_DIR_LIST_END, HTML_DIR_LIST_START, JS_LIVE_CONTENT};
+use crate::tmpl::{HTML_DIR_LIST_END, HTML_DIR_LIST_START, JS_LIVE_CONTENT, JS_LIVE_SCRIPT_TAG};
 use crate::xts::XString;
+use axum::Router;
+use axum::body::Body;
+use axum::extract::ws::{Message, WebSocket};
+use axum::extract::{Request, State, WebSocketUpgrade};
+use axum::middleware::{self, Next};
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::get;
 use futures::{SinkExt, StreamExt};
 use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
 use pathdiff::diff_paths;
-use std::format as f;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use std::{format as f, fs};
+use tokio::net::TcpListener;
 use tokio::sync::broadcast;
-use warp::hyper::Response;
-use warp::log::Info;
-use warp::path::FullPath;
-use warp::reply::Html;
-use warp::ws::{Message, WebSocket};
-use warp::Filter;
+use tower::ServiceExt;
+use tower_http::services::ServeDir;
+
+// region:    --- Modules
 
 mod cmd;
 mod tmpl;
 mod xts;
+
+// endregion: --- Modules
 
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_WEB_FOLDER: &str = "./";
@@ -38,76 +44,81 @@ impl Counter {
 	}
 }
 
+struct AppState {
+	root_dir: Arc<PathBuf>,
+	live_mode: bool,
+	broadcast_change_tx: broadcast::Sender<()>,
+	#[allow(unused)]
+	live_ws_counter: Arc<Counter>,
+	serve_dir: ServeDir,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let app = cmd_app().get_matches();
+	let app_args = cmd_app().get_matches();
 
 	// --- Get the port
-	let port = app
+	let port = app_args
 		.get_one::<String>("port")
 		.and_then(|val| val.parse::<u16>().ok())
 		.unwrap_or(DEFAULT_PORT);
 
 	// --- Get the root directory path
-	let root_dir = app
+	let root_dir_str = app_args
 		.get_one::<String>("dir")
 		.map(|v| v.to_owned())
 		.unwrap_or_else(|| DEFAULT_WEB_FOLDER.to_owned());
 
 	// --- Root dir to be served
-	let root_dir = Path::new(&root_dir).to_path_buf();
+	let root_dir = Path::new(&root_dir_str).to_path_buf();
+	let root_dir = Arc::new(root_dir);
 
 	// --- webdev live watch
-	let live_mode = app.get_flag("live");
+	let live_mode = app_args.get_flag("live");
 
 	let live_ws_counter = Counter::default();
 	let live_ws_counter = Arc::new(live_ws_counter);
 
-	let watch_paths = app.get_many::<String>("watch").map(|vals| vals.collect::<Vec<_>>());
+	let watch_paths = app_args.get_many::<String>("watch").map(|vals| vals.collect::<Vec<_>>());
 	let watch_paths = watch_paths
 		.map(|v| v.iter().map(|i| Path::new(i).to_path_buf()).collect::<Vec<PathBuf>>())
-		.unwrap_or_else(|| vec![root_dir.clone()]);
+		.unwrap_or_else(|| vec![root_dir.as_ref().clone()]);
 
 	let (broadcast_change_tx, _) = do_watch_paths(watch_paths).await;
 
-	let webdev_live_js = warp::path("_webdev_live.js").and(warp::get()).map(|| {
-		Response::builder()
-			.header("content-type", "text/javascript;charset=UTF-8")
-			.body(JS_LIVE_CONTENT)
+	let serve_dir = ServeDir::new(root_dir.as_ref());
+
+	let state = Arc::new(AppState {
+		root_dir: root_dir.clone(),
+		live_mode,
+		broadcast_change_tx,
+		live_ws_counter,
+		serve_dir,
 	});
 
-	let webdev_watch_ws = warp::path("_webdev_live_ws")
-		// The `ws()` filter will prepare the Websocket handshake.
-		.and(warp::ws())
-		.and(warp::any().map(move || broadcast_change_tx.subscribe()))
-		.and(warp::any().map(move || live_ws_counter.clone()))
-		.map(
-			|ws: warp::ws::Ws, change_rx: broadcast::Receiver<()>, live_ws_counter: Arc<Counter>| {
-				// And then our closure will be called when it completes...
-				ws.on_upgrade(|websocket| live_watch(websocket, change_rx, live_ws_counter))
-			},
-		);
-
-	let webdev_live_watch = webdev_live_js.or(webdev_watch_ws);
-
-	// --- Special fitlers for dir listing and html files
-	let special_filter = with_path_type(Arc::new(root_dir.clone()))
-		.and(warp::any().map(move || live_mode))
-		.and_then(special_file_handler);
-
-	// --- Fall back to normal file serving
-	let warp_dir_filter = warp::fs::dir(root_dir.clone());
-
-	// --- Combine Routes
-	let routes = webdev_live_watch.or(special_filter).or(warp_dir_filter);
-
-	// add the log
-	let routes = routes.with(warp::log::custom(log_req));
+	let routes = Router::new()
+		.route(
+			"/_webdev_live.js",
+			get(|| async {
+				Response::builder()
+					.header("content-type", "text/javascript;charset=UTF-8")
+					.body(Body::from(JS_LIVE_CONTENT))
+					.unwrap()
+			}),
+		)
+		.route(
+			"/_webdev_live_ws",
+			get(|ws: WebSocketUpgrade, State(state): State<Arc<AppState>>| async move {
+				ws.on_upgrade(move |socket| live_watch(socket, state.broadcast_change_tx.subscribe()))
+			}),
+		)
+		.fallback(special_file_handler)
+		.with_state(state)
+		.layer(middleware::from_fn(log_mw));
 
 	// --- Serve service
 	println!(
-		"Starting webdev server http://localhost:{}/ at dir {}",
-		port,
+		"Starting webdev server http://localhost:{port}/ at dir {}",
 		root_dir.to_string_lossy()
 	);
 	if !live_mode {
@@ -119,15 +130,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		println!("\tlive mode on.")
 	}
 
-	let is_public = app.get_flag("public");
-
-	let ip = if is_public {
+	let is_public = app_args.get_flag("public");
+	let addr = if is_public {
 		println!("! public mode on (listening on 0.0.0.0)");
-		[0, 0, 0, 0]
+		format!("0.0.0.0:{port}")
 	} else {
-		[127, 0, 0, 1]
+		format!("127.0.0.1:{port}")
 	};
-	warp::serve(routes).run((ip, port)).await;
+
+	let listener = TcpListener::bind(addr).await?;
+	axum::serve(listener, routes).await?;
 
 	Ok(())
 }
@@ -171,13 +183,13 @@ async fn do_watch_paths(watch_paths: Vec<PathBuf>) -> (broadcast::Sender<()>, br
 	(change_tx, change_rx)
 }
 
-async fn live_watch(ws: WebSocket, mut change_rx: broadcast::Receiver<()>, _live_ws_counter: Arc<Counter>) {
+async fn live_watch(ws: WebSocket, mut change_rx: broadcast::Receiver<()>) {
 	let (mut ws_tx, _) = ws.split();
 
 	tokio::task::spawn(async move {
 		loop {
 			let _ = change_rx.recv().await;
-			let send_res = ws_tx.send(Message::text("server_files_changed".to_string())).await;
+			let send_res = ws_tx.send(Message::Text("server_files_changed".into())).await;
 			// if we have an error, we break which will drop this websocket
 			if send_res.is_err() {
 				break;
@@ -202,41 +214,36 @@ enum SpecialPath {
 	NotSpecial,
 }
 
-fn with_path_type(
-	root_dir: Arc<PathBuf>,
-) -> impl Filter<Extract = (SpecialPath,), Error = std::convert::Infallible> + Clone {
-	warp::any().and(warp::path::full()).map(move |full_path: FullPath| {
-		let web_path = full_path.as_str().trim_start_matches('/');
+async fn special_file_handler(State(state): State<Arc<AppState>>, req: Request<Body>) -> impl IntoResponse {
+	let uri = req.uri().clone();
+	let web_path = uri.path().trim_start_matches('/');
 
-		// -- Add .html on extension less path.
-		// If no extension and not end with /, for now add `.html`
-		// Later, this might be a config property.
-		let target_path = if !web_path.is_empty() && !web_path.contains('.') && !web_path.ends_with('/') {
-			root_dir.join(format!("{web_path}.html"))
-		} else {
-			root_dir.join(web_path)
-		};
+	// -- Add .html on extension less path.
+	// If no extension and not end with /, for now add `.html`
+	// Later, this might be a config property.
+	let target_path = if !web_path.is_empty() && !web_path.contains('.') && !web_path.ends_with('/') {
+		state.root_dir.join(f!("{web_path}.html"))
+	} else {
+		state.root_dir.join(web_path)
+	};
 
-		let path_info = PathInfo {
-			root_dir: root_dir.clone(),
-			target_path,
-		};
+	let path_info = PathInfo {
+		root_dir: state.root_dir.clone(),
+		target_path,
+	};
 
-		if path_info.target_path.is_dir() {
-			SpecialPath::Dir(path_info)
-		} else if path_info.target_path.is_file() {
-			match path_info.target_path.extension().and_then(|s| s.to_str()) {
-				None => SpecialPath::ExtLessFile(path_info),
-				Some("html") | Some("HTML") => SpecialPath::HtmlFile(path_info),
-				_ => SpecialPath::NotSpecial,
-			}
-		} else {
-			SpecialPath::NotSpecial
+	let special_path = if path_info.target_path.is_dir() {
+		SpecialPath::Dir(path_info)
+	} else if path_info.target_path.is_file() {
+		match path_info.target_path.extension().and_then(|s| s.to_str()) {
+			None => SpecialPath::ExtLessFile(path_info),
+			Some("html") | Some("HTML") => SpecialPath::HtmlFile(path_info),
+			_ => SpecialPath::NotSpecial,
 		}
-	})
-}
+	} else {
+		SpecialPath::NotSpecial
+	};
 
-async fn special_file_handler(special_path: SpecialPath, live_mode: bool) -> Result<Html<String>, warp::Rejection> {
 	match special_path {
 		SpecialPath::Dir(path_info) => {
 			// TODO: Needs to handle the case when we have a index.html
@@ -262,29 +269,36 @@ async fn special_file_handler(special_path: SpecialPath, live_mode: bool) -> Res
 
 			let html = f!("{HTML_DIR_LIST_START}{html}{HTML_DIR_LIST_END}");
 
-			Ok(warp::reply::html(html))
+			Html(html).into_response()
 		}
 		SpecialPath::ExtLessFile(path_info) | SpecialPath::HtmlFile(path_info) => {
-			// FIXME: Remove the unwrap
-			let mut html = fs::read_to_string(path_info.target_path).unwrap();
-			if live_mode {
-				html.push_str(JS_LIVE_SCRIPT_TAG);
+			match fs::read_to_string(path_info.target_path) {
+				Ok(mut html) => {
+					if state.live_mode {
+						html.push_str(JS_LIVE_SCRIPT_TAG);
+					}
+					Html(html).into_response()
+				}
+				Err(_) => state.serve_dir.clone().oneshot(req).await.unwrap().into_response(),
 			}
-			Ok(warp::reply::html(html))
 		}
-		// When not special, return not found in this handler, so that the default warp::dir
-		// filter can take over.
-		SpecialPath::NotSpecial => Err(warp::reject::not_found()),
+		// When not special, use serve_dir to handle the request.
+		SpecialPath::NotSpecial => state.serve_dir.clone().oneshot(req).await.unwrap().into_response(),
 	}
 }
 // endregion: --- Special File (dir and extension less)
 
-fn log_req(info: Info) {
-	println!(
-		" {} {} {} ({}ms)",
-		info.method(),
-		info.status(),
-		info.path(),
-		info.elapsed().as_micros() as f64 / 1000.
-	);
+async fn log_mw(req: Request, next: Next) -> Response {
+	let start = Instant::now();
+	let method = req.method().clone();
+	let path = req.uri().path().to_string();
+
+	let response = next.run(req).await;
+
+	let status = response.status();
+	let elapsed = start.elapsed().as_micros() as f64 / 1000.;
+
+	println!(" {method} {status} {path} ({elapsed}ms)");
+
+	response
 }
