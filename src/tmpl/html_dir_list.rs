@@ -12,8 +12,8 @@ pub const HTML_DIR_LIST_START: &str = r#"
 
   <style>
   body { 
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: max-content;
     font-size: 16px;
     gap: .5rem;
   }

@@ -253,14 +253,14 @@ async fn special_file_handler(State(state): State<Arc<AppState>>, req: Request<B
 			let paths = fs::read_dir(&target_path);
 			match paths {
 				Ok(paths) => {
+					let mut paths: Vec<_> = paths.filter_map(|p| p.ok().map(|v| v.path())).collect();
+					paths.sort();
 					for path in paths {
-						if let Some(path) = path.ok().map(|v| v.path()) {
-							if let Some(diff) = diff_paths(&path, root_dir.as_ref()).x_string() {
-								let disp = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
-								let suffix = if path.is_dir() { "/" } else { "" };
-								let href = format!("/{}{suffix}", diff);
-								html.push_str(&format!(r#"<a href="{}">{}{suffix}</a>"#, href, disp));
-							}
+						if let Some(diff) = diff_paths(&path, root_dir.as_ref()).x_string() {
+							let disp = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown");
+							let suffix = if path.is_dir() { "/" } else { "" };
+							let href = format!("/{}{suffix}", diff);
+							html.push_str(&format!(r#"<a href="{}">{}{suffix}</a>"#, href, disp));
 						}
 					}
 				}
