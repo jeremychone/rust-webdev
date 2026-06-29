@@ -1,6 +1,6 @@
 [package]
 name = "webdev"
-version = "0.2.0"
+version = "0.2.1-WIP"
 homepage = "https://github.com/jeremychone/rust-webdev"
 description = "Simple local dev web server for localhost development (NOT FOR PROD)"
 repository = "https://github.com/jeremychone/rust-webdev"
