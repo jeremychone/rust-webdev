@@ -1,4 +1,4 @@
-use clap::{crate_version, Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, Command, crate_version};
 
 pub fn cmd_app() -> Command {
 	Command::new("webdev")
